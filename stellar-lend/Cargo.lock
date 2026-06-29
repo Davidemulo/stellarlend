@@ -1036,6 +1036,7 @@ dependencies = [
  "stellar-contract-utils",
  "stellar-macros",
  "stellarlend-amm",
+ "stellarlend-oracle-client",
 ]
 
 [[package]]
@@ -2675,6 +2676,13 @@ dependencies = [
  "soroban-sdk",
  "soroban-token-sdk",
  "stellarlend-common",
+]
+
+[[package]]
+name = "stellarlend-oracle-client"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
