@@ -7,17 +7,33 @@ members = [
   "contracts/amm",
   "contracts/bridge",
   "contracts/common",
+  "contracts/shared-deadline",
   "contracts/delegation-registry",
   "contracts/hello-world",
   "contracts/lending",
+  "contracts/lending-core",
+  "contracts/lending-types",
+  "contracts/lending-interest",
+  "contracts/lending-risk",
+  "contracts/safe-math",
   "contracts/stablecoin",
   "contracts/institutional-wallet",
   "contracts/migration-hub",
+  "contracts/test-utils",
+  "contracts/stealth-address",
+  "contracts/privacy-pool",
+  "contracts/reputation-system",
+  "contracts/copy-lending",
+  "contracts/dispute-resolution",
+  "contracts/credit-delegation",
 ]
-exclude = ["fuzz"]
+exclude = ["fuzz", "formal-verification/safe-math-proofs"]
+
+[workspace.lints.rust]
 
 [workspace.dependencies]
 soroban-sdk = "23.4.1"
+stellarlend-safe-math = { path = "contracts/safe-math" }
 soroban-token-sdk = { version = "23.4.1" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -37,3 +53,9 @@ codegen-units = 1
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
+
+[profile.dev]
+incremental = true
+
+[profile.test]
+incremental = true

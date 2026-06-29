@@ -1,5 +1,6 @@
 use crate::events::FlashLoanEvent;
 use crate::pause::{is_paused, PauseType};
+use crate::reentrancy::{ReentrancyGuard, ReentrancyKey};
 use soroban_sdk::{contracterror, contracttype, token, Address, Bytes, Env, IntoVal, Symbol};
 
 /// RAII guard for flash loan reentrancy protection.
@@ -48,7 +49,9 @@ pub enum FlashLoanError {
     ConcurrentLoan = 10,
     /// TWAP price deviates too far from the spot price — manipulation detected.
     PriceManipulationDetected = 11,
-    Overflow = 12,
+    /// Flash loan crossed into a later ledger sequence before completion.
+    Expired = 12,
+    Overflow = 13,
 }
 
 /// Storage keys for flash loan data.
@@ -278,6 +281,11 @@ pub fn flash_loan(
     spot_price: i128,
     params: Bytes,
 ) -> Result<(), FlashLoanError> {
+    // CHECKS-EFFECTS-INTERACTIONS PATTERN
+    // 1. CHECKS: Reentrancy guard, pause state, validation, attack prevention
+    let _guard = ReentrancyGuard::new_with_key(env, ReentrancyKey::FlashLoanLock, false)
+        .map_err(|_| FlashLoanError::Reentrancy)?;
+
     if is_paused(env, PauseType::FlashLoan) {
         return Err(FlashLoanError::FlashLoanPaused);
     }
@@ -303,15 +311,19 @@ pub fn flash_loan(
     // 4. Per-asset concurrent loan guard (sandwich prevention).
     let _asset_guard = AssetLoanGuard::acquire(env, &asset)?;
 
-    // 5. Global reentrancy guard.
-    let _guard = FlashLoanGuard::new(env, FlashLoanDataKey::ReentrancyGuard)?;
+    // 5. Global reentrancy guard (legacy, kept for compatibility).
+    let _legacy_guard = FlashLoanGuard::new(env, FlashLoanDataKey::ReentrancyGuard)?;
 
     let fee = calculate_fee(env, amount);
     let initial_balance = pool_balance;
+    let start_sequence = env.ledger().sequence_number();
 
     // Record this spot price into the TWAP before dispatching.
     record_price_sample(env, &asset, spot_price);
 
+    // 2. EFFECTS: State updates (TWAP recording done above)
+
+    // 3. INTERACTIONS: External calls (transfer, callback)
     // Transfer funds to the receiver.
     token_client.transfer(&env.current_contract_address(), &receiver, &amount);
 
@@ -331,6 +343,10 @@ pub fn flash_loan(
 
     if !callback_result {
         return Err(FlashLoanError::CallbackFailed);
+    }
+
+    if env.ledger().sequence_number() != start_sequence {
+        return Err(FlashLoanError::Expired);
     }
 
     // Verify repayment.
