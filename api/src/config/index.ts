@@ -10,6 +10,21 @@ dotenv.config();
 
 let configSource = 'environment';
 
+const SENSITIVE_ENV_PATTERN = /secret|token|password|api[_-]?key|key/i;
+
+function maskSecret(value: string | undefined): string {
+  if (!value) return '****';
+  if (value.length <= 8) return '****';
+  return `${value.slice(0, 2)}${'*'.repeat(value.length - 4)}${value.slice(-2)}`;
+}
+
+function getSensitiveEnvAuditEntries(): string[] {
+  return Object.entries(process.env)
+    .filter(([key]) => SENSITIVE_ENV_PATTERN.test(key))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${maskSecret(value)}`);
+}
+
 function parseCorsOrigins(): string[] {
   const raw = process.env.ALLOWED_ORIGINS;
   if (raw) {
@@ -105,7 +120,7 @@ function buildConfig(): AppConfig {
     },
     cache: {
       redisEnabled: process.env.REDIS_ENABLED === 'true',
-      redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+      redisUrl: process.env.REDIS_URL || '',
       idempotencyTtlMs: parseInt(
         process.env.IDEMPOTENCY_TTL_MS || '86400000',
         10
@@ -171,6 +186,16 @@ function buildConfig(): AppConfig {
   };
 
   assertValidConfig(cfg);
+
+  const sensitiveEntries = getSensitiveEnvAuditEntries();
+  if (sensitiveEntries.length > 0) {
+    configAuditService.record({
+      timestamp: new Date().toISOString(),
+      action: 'validated',
+      source: configSource,
+      changes: sensitiveEntries,
+    });
+  }
 
   return cfg;
 }

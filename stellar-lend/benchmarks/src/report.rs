@@ -1,12 +1,13 @@
 //! # Benchmark Report Generation
 //!
-//! Handles result formatting, JSON output, baseline comparison,
-//! and regression detection for CI integration.
+//! Handles result formatting, JSON output, Markdown output, baseline comparison,
+//! historical trend storage, and regression detection for CI integration.
 
 use crate::framework::{BenchmarkResult, Regression};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 
 /// Full benchmark report written to JSON
 #[derive(Debug, Serialize, Deserialize)]
@@ -208,8 +209,12 @@ pub fn write_json(results: &[BenchmarkResult], path: &str) {
 
 /// Compare results against a baseline JSON file.
 /// Returns a list of regressions (operations that exceeded their budget or
-/// increased by more than 10% compared to baseline).
-pub fn compare_baseline(results: &[BenchmarkResult], baseline_path: &str) -> Vec<Regression> {
+/// increased by more than the configured threshold compared to baseline).
+pub fn compare_baseline(
+    results: &[BenchmarkResult],
+    baseline_path: &str,
+    threshold: f64,
+) -> Vec<Regression> {
     let baseline_json = match fs::read_to_string(baseline_path) {
         Ok(s) => s,
         Err(e) => {
@@ -249,13 +254,13 @@ pub fn compare_baseline(results: &[BenchmarkResult], baseline_path: &str) -> Vec
             continue;
         }
 
-        // Check regression vs baseline (>10% increase triggers alert)
+        // Check regression vs baseline (configurable threshold triggers alert)
         if let Some(&baseline_insns) = baseline_map.get(&result.operation) {
             if baseline_insns > 0 {
                 let increase_pct = (result.instructions as f64 - baseline_insns as f64)
                     / baseline_insns as f64
                     * 100.0;
-                if increase_pct > 10.0 {
+                if increase_pct > threshold {
                     regressions.push(Regression {
                         operation: result.operation.clone(),
                         actual: result.instructions,
@@ -269,6 +274,7 @@ pub fn compare_baseline(results: &[BenchmarkResult], baseline_path: &str) -> Vec
 
     regressions
 }
+
 /// Historical trend entry for tracking benchmark performance over time
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HistoricalEntry {

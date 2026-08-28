@@ -126,6 +126,15 @@ function keypairFromSecret(secret: string): Keypair {
   }
 }
 
+/** Deterministic, non-cryptographic hash used to derive simulated values from an address string. */
+function simpleHash(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) & 0x7fffffff;
+  }
+  return hash;
+}
+
 export class StellarService {
   private horizonUrl: string;
   private sorobanRpcUrl: string;
@@ -316,6 +325,25 @@ export class StellarService {
     const tx = this.buildReadOnlyTransaction(methodName, ...params);
     const simulation = await (this.sorobanServer as any).simulateTransaction(tx);
     return decodeSimulationResult(simulation);
+  }
+
+  /**
+   * Get TWAP-based liquidation price for an asset.
+   * Calls the contract's get_liquidation_price function which returns TWAP
+   * with fallback to median spot price across sources on manipulation.
+   */
+  async getLiquidationPrice(asset: string): Promise<string> {
+    try {
+      const assetAddress = new Address(asset);
+      const result = await this.simulateContractCall(
+        'get_liquidation_price',
+        assetAddress.toScVal()
+      );
+      return result?.toString() ?? '0';
+    } catch (error) {
+      logger.error('Failed to get liquidation price:', error);
+      return '0';
+    }
   }
 
   async getProtocolStats(): Promise<ProtocolStatsResponse> {
@@ -850,7 +878,7 @@ export class StellarService {
     poolAddress: string,
     _timestamp: number
   ): Promise<{ utilizationRate: number; totalDeposits: string; totalBorrows: string }> {
-    const simVal = poolAddress ? parseInt(poolAddress.slice(-4), 16) % 100 : 50;
+    const simVal = poolAddress ? simpleHash(poolAddress) % 100 : 50;
     return {
       utilizationRate: simVal / 100,
       totalDeposits: (1000000n * BigInt(simVal + 50)).toString(),

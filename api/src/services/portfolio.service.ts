@@ -504,9 +504,9 @@ export function getHealthFactorMonitor(
   const trend: HealthFactorMonitor['trend'] =
     recentFactors.length < 2
       ? 'stable'
-      : recentFactors[recentFactors.length - 1] > recentFactors[0]
+      : recentFactors[recentFactors.length - 1]! > recentFactors[0]!
         ? 'improving'
-        : recentFactors[recentFactors.length - 1] < recentFactors[0]
+        : recentFactors[recentFactors.length - 1]! < recentFactors[0]!
           ? 'deteriorating'
           : 'stable';
 

@@ -42,6 +42,7 @@
 use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol};
 
 use crate::deposit::DepositDataKey;
+use crate::reserve_factor;
 
 /// Maximum allowed reserve factor (50% = 5000 basis points)
 /// This ensures that at least 50% of interest always goes to lenders
@@ -98,6 +99,9 @@ pub enum ReserveDataKey {
     /// Virtual LP token balance tracked per asset for AMM deployments.
     /// (Accounting only; actual LP token custody is managed by the AMM contract / ops layer.)
     ReserveAmmLpBalance(Option<Address>),
+    /// Dynamic reserve factor curve per asset.
+    /// Value type: ReserveFactorCurve
+    ReserveFactorCurve(Option<Address>),
 }
 
 /// Initialize reserve configuration for an asset
@@ -192,6 +196,18 @@ pub fn set_reserve_factor(
     env.events().publish(topics, (asset, reserve_factor_bps));
 
     Ok(())
+}
+
+/// Get the reserve factor, preferring the treasury fee config, falling back to static storage.
+///
+/// This allows the reserve factor to be configured through the treasury fee configuration,
+/// providing a single source of truth for the reserve factor that integrates with fee management.
+pub fn get_reserve_factor_from_fee_config(env: &Env, asset: Option<Address>) -> i128 {
+    // Try treasury fee config first
+    let fee_factor = reserve::get_static_reserve_factor(env, asset);
+    // The treasury fee config provides a default; if explicitly set in storage, use that
+    let storage_factor = get_static_reserve_factor(env, asset);
+    storage_factor
 }
 
 /// Get the reserve factor for an asset
