@@ -130,6 +130,10 @@ pub fn initialize_risk_params(env: &Env) -> Result<(), RiskParamsError> {
     Ok(())
 }
 
+/// Get current risk parameters (legacy storage)
+pub fn get_legacy_risk_params(env: &Env) -> Option<RiskParams> {
+    let config_key = RiskParamsDataKey::RiskParamsConfig;
+    env.storage()
 /// Get current risk parameters.
 ///
 /// Reads the packed pool-config slot (issue #722). If only the legacy spread
@@ -180,6 +184,18 @@ pub fn migrate_from_legacy(env: &Env) -> bool {
         }
         None => false,
     }
+}
+
+/// Get current risk parameters from packed config (#713)
+pub fn get_risk_params(env: &Env) -> Option<RiskParams> {
+    let packed = crate::storage::migrate_from_legacy(env, &None).ok()?;
+    Some(RiskParams {
+        min_collateral_ratio: packed.min_collateral_ratio_bps,
+        liquidation_threshold: packed.liquidation_threshold_bps,
+        close_factor: packed.close_factor_bps,
+        liquidation_incentive: packed.liquidation_incentive_bps,
+        last_update: packed.last_update,
+    })
 }
 
 /// Validate risk configuration

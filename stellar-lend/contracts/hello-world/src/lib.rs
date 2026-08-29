@@ -341,6 +341,36 @@ impl HelloContract {
         Ok(())
     }
 
+    /// Set pool configuration using the packed storage layout (#713)
+    pub fn set_pool_config(
+        env: Env,
+        caller: Address,
+        pool: Option<Address>,
+        config: storage::PoolConfig,
+    ) -> Result<(), LendingError> {
+        risk_management::require_admin(&env, &caller)?;
+        storage::store_pool_config(&env, &pool, &config)
+            .map_err(|_| LendingError::InvalidParameter)?;
+        pool_state::invalidate(&env, &pool);
+        Ok(())
+    }
+
+    /// Get packed pool configuration (#713)
+    pub fn get_pool_config(
+        env: Env,
+        pool: Option<Address>,
+    ) -> storage::PoolConfig {
+        storage::migrate_from_legacy(&env, &pool).unwrap_or_else(|_| storage::PoolConfig {
+            min_collateral_ratio_bps: 11_000,
+            liquidation_threshold_bps: 10_500,
+            reserve_factor_bps: 1_000,
+            close_factor_bps: 5_000,
+            liquidation_incentive_bps: 1_000,
+            last_update: env.ledger().timestamp(),
+            flags: storage::FLAG_BORROWING_ENABLED | storage::FLAG_COLLATERAL_ENABLED,
+        })
+    }
+
     pub fn borrow_asset(
         env: Env,
         user: Address,
@@ -424,33 +454,6 @@ impl HelloContract {
         // Invalidate any cached lazy pool-state snapshots (#721).
         pool_state::invalidate(&env, &asset);
         Ok(())
-    }
-
-    /// Set treasury address (admin only)
-    pub fn set_treasury_address(
-        env: Env,
-        caller: Address,
-        treasury: Address,
-    ) -> Result<(), LendingError> {
-        reserve::set_treasury_address(&env, caller, treasury).map_err(Into::into)
-    }
-
-    /// Withdraw reserves to treasury (admin only)
-    pub fn withdraw_reserve_funds(
-        env: Env,
-        caller: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> Result<i128, LendingError> {
-        reserve::withdraw_reserve_funds(&env, caller, asset, amount).map_err(Into::into)
-    }
-
-    /// Get reserve balance for an asset
-    pub fn get_reserve_balance_reserve(
-        env: Env,
-        asset: Option<Address>,
-    ) -> i128 {
-        reserve::get_reserve_balance(&env, asset)
     }
 
     /// Get reserve factor for an asset
@@ -971,6 +974,10 @@ impl HelloContract {
         callback: Address,
     ) -> Result<i128, LendingError> {
         flash_loan::execute_flash_loan(&env, user, asset, amount, callback).map_err(Into::into)
+    }
+
+    pub fn get_flash_loan_metrics(env: Env, asset: Option<Address>) -> stellarlend_flash_loan::FlashLoanMetrics {
+        flash_loan::get_flash_loan_metrics(&env, asset)
     }
 
     /// Pre-execution profit simulation for a flash-loan-funded liquidation.
@@ -1807,6 +1814,18 @@ impl HelloContract {
         asset: Option<Address>,
     ) -> pool_state::PoolStateSnapshot {
         pool_state::load(&env, &asset)
+    }
+
+    /// Batch read multiple pool states in a single RPC call.
+    pub fn get_multiple_pool_states(
+        env: Env,
+        assets: Vec<Option<Address>>,
+    ) -> Vec<pool_state::PoolStateSnapshot> {
+        let mut results = Vec::new(&env);
+        for asset in assets {
+            results.push_back(pool_state::load(&env, &asset));
+        }
+        results
     }
 
     /// Whether a pool's lazy state has been materialized at least once (#721).
