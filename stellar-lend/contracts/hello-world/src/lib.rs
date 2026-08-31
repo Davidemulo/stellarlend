@@ -8,9 +8,13 @@ pub mod amm;
 pub mod analytics;
 pub mod borrow;
 pub mod bridge;
+pub mod circuit_breaker;
 pub mod config;
+pub mod credit_score;
 pub mod cross_asset;
+pub mod debt_token;
 pub mod deposit;
+pub mod emergency_withdrawal;
 pub mod errors;
 pub mod events;
 pub mod flash_loan;
@@ -23,20 +27,25 @@ pub mod mev_protection;
 pub mod multi_collateral;
 pub mod multisig;
 pub mod oracle;
+pub mod pool_state;
 pub mod rate_limiter;
 pub mod rate_guard;
+pub mod rebalancing;
 pub mod recovery;
 pub mod reentrancy;
 pub mod reputation;
 pub mod repay;
 pub mod reserve;
+pub mod reserve_factor;
 pub mod risk_management;
 pub mod risk_params;
 pub mod safe_math;
 pub mod storage;
 pub mod treasury;
-pub mod test_utils;
-pub mod tests;
+#[cfg(test)]
+mod test_utils;
+#[cfg(test)]
+mod tests;
 pub mod types;
 pub mod withdraw;
 
@@ -327,7 +336,39 @@ impl HelloContract {
         )
         .map_err(|_| RiskManagementError::InvalidParameter)?;
 
+        // Invalidate any cached lazy pool-state snapshots (#721).
+        pool_state::bump_epoch(&env);
         Ok(())
+    }
+
+    /// Set pool configuration using the packed storage layout (#713)
+    pub fn set_pool_config(
+        env: Env,
+        caller: Address,
+        pool: Option<Address>,
+        config: storage::PoolConfig,
+    ) -> Result<(), LendingError> {
+        risk_management::require_admin(&env, &caller)?;
+        storage::store_pool_config(&env, &pool, &config)
+            .map_err(|_| LendingError::InvalidParameter)?;
+        pool_state::invalidate(&env, &pool);
+        Ok(())
+    }
+
+    /// Get packed pool configuration (#713)
+    pub fn get_pool_config(
+        env: Env,
+        pool: Option<Address>,
+    ) -> storage::PoolConfig {
+        storage::migrate_from_legacy(&env, &pool).unwrap_or_else(|_| storage::PoolConfig {
+            min_collateral_ratio_bps: 11_000,
+            liquidation_threshold_bps: 10_500,
+            reserve_factor_bps: 1_000,
+            close_factor_bps: 5_000,
+            liquidation_incentive_bps: 1_000,
+            last_update: env.ledger().timestamp(),
+            flags: storage::FLAG_BORROWING_ENABLED | storage::FLAG_COLLATERAL_ENABLED,
+        })
     }
 
     pub fn borrow_asset(
@@ -408,34 +449,11 @@ impl HelloContract {
         asset: Option<Address>,
         reserve_factor_bps: i128,
     ) -> Result<(), LendingError> {
-        reserve::set_reserve_factor(&env, caller, asset, reserve_factor_bps).map_err(Into::into)
-    }
-
-    /// Set treasury address (admin only)
-    pub fn set_treasury_address(
-        env: Env,
-        caller: Address,
-        treasury: Address,
-    ) -> Result<(), LendingError> {
-        reserve::set_treasury_address(&env, caller, treasury).map_err(Into::into)
-    }
-
-    /// Withdraw reserves to treasury (admin only)
-    pub fn withdraw_reserve_funds(
-        env: Env,
-        caller: Address,
-        asset: Option<Address>,
-        amount: i128,
-    ) -> Result<i128, LendingError> {
-        reserve::withdraw_reserve_funds(&env, caller, asset, amount).map_err(Into::into)
-    }
-
-    /// Get reserve balance for an asset
-    pub fn get_reserve_balance_reserve(
-        env: Env,
-        asset: Option<Address>,
-    ) -> i128 {
-        reserve::get_reserve_balance(&env, asset)
+        reserve::set_reserve_factor(&env, caller, asset.clone(), reserve_factor_bps)
+            .map_err(LendingError::from)?;
+        // Invalidate any cached lazy pool-state snapshots (#721).
+        pool_state::invalidate(&env, &asset);
+        Ok(())
     }
 
     /// Get reserve factor for an asset
@@ -681,6 +699,17 @@ impl HelloContract {
         .map_err(Into::into)
     }
 
+    /// Batch liquidation — processes multiple borrower positions in one call,
+    /// skipping unprofitable items via `UnprofitableLiquidation` (issue #723).
+    pub fn batch_liquidate(
+        env: Env,
+        liquidator: Address,
+        requests: Vec<liquidate::BatchLiquidationRequest>,
+    ) -> Result<Vec<liquidate::BatchLiquidationResult>, LendingError> {
+        liquidator.require_auth();
+        liquidate::batch_liquidate(&env, liquidator, requests).map_err(Into::into)
+    }
+
     pub fn configure_mev_protection(
         env: Env,
         caller: Address,
@@ -808,6 +837,44 @@ impl HelloContract {
         mev_protection::get_commit(&env, commit_id)
     }
 
+    pub fn get_mev_sandwich_attack_log(
+        env: Env,
+    ) -> Vec<mev_protection::SandwichAttackRecord> {
+        mev_protection::get_sandwich_attack_log(&env)
+    }
+
+    pub fn get_mev_sandwich_report(
+        env: Env,
+    ) -> mev_protection::SandwichAttackReport {
+        mev_protection::get_sandwich_report(&env)
+    }
+
+    pub fn get_mev_auction_stats(env: Env) -> mev_protection::AuctionStats {
+        mev_protection::get_auction_stats(&env)
+    }
+
+    pub fn get_mev_gas_bid_stats(
+        env: Env,
+        operation: mev_protection::SensitiveOperation,
+        asset: Option<Address>,
+    ) -> mev_protection::GasBidStats {
+        mev_protection::get_gas_bid_stats(&env, operation, asset)
+    }
+
+    pub fn get_mev_liquidation_auction(
+        env: Env,
+        auction_id: u64,
+    ) -> Option<mev_protection::LiquidationAuction> {
+        mev_protection::get_liquidation_auction(&env, auction_id)
+    }
+
+    pub fn get_mev_liquidation_bid(
+        env: Env,
+        bid_id: u64,
+    ) -> Option<mev_protection::LiquidationAuctionBid> {
+        mev_protection::get_liquidation_bid(&env, bid_id)
+    }
+
     pub fn preview_mev_fee_bps(
         env: Env,
         operation: mev_protection::SensitiveOperation,
@@ -909,6 +976,10 @@ impl HelloContract {
         flash_loan::execute_flash_loan(&env, user, asset, amount, callback).map_err(Into::into)
     }
 
+    pub fn get_flash_loan_metrics(env: Env, asset: Option<Address>) -> stellarlend_flash_loan::FlashLoanMetrics {
+        flash_loan::get_flash_loan_metrics(&env, asset)
+    }
+
     /// Pre-execution profit simulation for a flash-loan-funded liquidation.
     pub fn simulate_flash_loan_liquidation(
         env: Env,
@@ -985,6 +1056,20 @@ impl HelloContract {
     ) -> Result<(), LendingError> {
         risk_params::require_min_collateral_ratio(&env, collateral_value, debt_value)
             .map_err(Into::into)
+    }
+
+    /// Migrate any legacy (spread) pool config into the packed slot (issue #722).
+    /// Returns `true` if a migration ran. Idempotent.
+    pub fn get_risk_params_layout(
+        env: Env,
+    ) -> Result<u128, LendingError> {
+        Ok(risk_params::get_risk_params(&env)
+            .map(|p| risk_params::pack_risk_params(&p))
+            .unwrap_or(0))
+    }
+
+    pub fn migrate_pool_config_packed(env: Env) -> bool {
+        risk_params::migrate_from_legacy(&env)
     }
 
     // -------------------------------------------------------------------------
@@ -1527,6 +1612,25 @@ impl HelloContract {
         analytics::generate_user_report(&env, &user).map_err(Into::into)
     }
 
+    /// Read-only position health simulation for an existing account under hypothetical price/amount scenarios (Issue #731).
+    pub fn simulate_position_health(
+        env: Env,
+        user: Address,
+        scenario: analytics::PositionSimulationScenario,
+    ) -> Result<analytics::PositionSimulationResult, LendingError> {
+        analytics::simulate_position_health(&env, &user, scenario).map_err(Into::into)
+    }
+
+    /// Pure what-if analysis simulating position health given hypothetical collateral & debt (Issue #731).
+    pub fn simulate_what_if(
+        env: Env,
+        collateral: i128,
+        debt: i128,
+        scenario: analytics::PositionSimulationScenario,
+    ) -> Result<analytics::PositionSimulationResult, LendingError> {
+        analytics::simulate_what_if(&env, collateral, debt, scenario).map_err(Into::into)
+    }
+
     /// Read-only recent protocol activity feed query.
     pub fn get_recent_activity(
         env: Env,
@@ -1713,7 +1817,62 @@ impl HelloContract {
             rate_ceiling_bps,
             spread_bps,
         )
-        .map_err(Into::into)
+        .map_err(LendingError::from)?;
+        // Invalidate any cached lazy pool-state snapshots (#721).
+        pool_state::bump_epoch(&env);
+        Ok(())
+    }
+
+    /// Lazily load the consolidated on-chain state for a pool (#721).
+    ///
+    /// The snapshot is built on first access, cached in short-lived storage
+    /// keyed by a global epoch, and served from cache on subsequent reads
+    /// until a relevant mutation bumps the epoch.
+    pub fn get_pool_state(
+        env: Env,
+        asset: Option<Address>,
+    ) -> pool_state::PoolStateSnapshot {
+        pool_state::load(&env, &asset)
+    }
+
+    /// Batch read multiple pool states in a single RPC call.
+    pub fn get_multiple_pool_states(
+        env: Env,
+        assets: Vec<Option<Address>>,
+    ) -> Vec<pool_state::PoolStateSnapshot> {
+        let mut results = Vec::new(&env);
+        for asset in assets {
+            results.push_back(pool_state::load(&env, &asset));
+        }
+        results
+    }
+
+    /// Whether a pool's lazy state has been materialized at least once (#721).
+    pub fn is_pool_state_initialized(env: Env, asset: Option<Address>) -> bool {
+        pool_state::is_initialized(&env, &asset)
+    }
+
+    /// Current global pool-state cache epoch (#721).
+    pub fn get_pool_state_epoch(env: Env) -> u64 {
+        pool_state::current_epoch(&env)
+    }
+
+    /// Cache hit / miss / rebuild / invalidation counters for lazy pool-state
+    /// loading (#721).
+    pub fn get_pool_state_metrics(env: Env) -> pool_state::PoolStateMetrics {
+        pool_state::metrics(&env)
+    }
+
+    /// Force a rebuild of a pool's cached state on next access (admin-only, #721).
+    pub fn invalidate_pool_state(
+        env: Env,
+        caller: Address,
+        asset: Option<Address>,
+    ) -> Result<(), LendingError> {
+        risk_management::require_admin(&env, &caller)
+            .map_err(|_| LendingError::Unauthorized)?;
+        pool_state::invalidate(&env, &asset);
+        Ok(())
     }
 
     /// Current global borrow index (scaled by 1e12; starts at 1e12 = "1.0").
@@ -1962,28 +2121,6 @@ impl HelloContract {
         amm::get_lp_token_balance(&env, &asset)
     }
 
-    /// Set the withdrawal buffer BPS for an asset (admin-only).
-    pub fn amm_set_withdrawal_buffer(
-        env: Env,
-        admin: Address,
-        asset: Address,
-        buffer_bps: i128,
-    ) -> Result<(), LendingError> {
-        amm::set_withdrawal_buffer(&env, admin, asset, buffer_bps)
-            .map_err(|_| LendingError::InvalidAmount)
-    }
-
-    /// Record accrued LP fees for an asset (admin-only).
-    pub fn amm_record_lp_fees(
-        env: Env,
-        admin: Address,
-        asset: Address,
-        fee_amount: i128,
-    ) -> Result<(), LendingError> {
-        amm::record_lp_fees(&env, admin, asset, fee_amount)
-            .map_err(|_| LendingError::InvalidAmount)
-    }
-
     /// Auto-compound accrued LP fees back into the LP position for a single asset.
     ///
     /// Returns the total amount compounded (0 when nothing was accrued).
@@ -1993,17 +2130,6 @@ impl HelloContract {
         asset: Address,
     ) -> Result<i128, LendingError> {
         amm::compound_lp_fees(&env, admin, asset)
-            .map_err(|_| LendingError::InvalidAmount)
-    }
-
-    /// Calculate optimal AMM allocation given current pool utilization.
-    pub fn amm_calculate_optimal_allocation(
-        env: Env,
-        asset: Address,
-        total_liquidity: i128,
-        borrowed_amount: i128,
-    ) -> Result<amm::AllocationSuggestion, LendingError> {
-        amm::calculate_optimal_allocation(&env, &asset, total_liquidity, borrowed_amount)
             .map_err(|_| LendingError::InvalidAmount)
     }
 
@@ -2035,22 +2161,6 @@ impl HelloContract {
     ) -> Result<amm::OptimizationResult, LendingError> {
         amm::optimize_allocation(&env, &pools)
             .map_err(|_| LendingError::InvalidAmount)
-    }
-
-    /// Update the impermanent-loss tracking snapshot for an asset.
-    /// Returns `true` when the IL alert threshold has been crossed.
-    pub fn amm_update_il_tracking(
-        env: Env,
-        asset: Address,
-        current_price: i128,
-    ) -> Result<bool, LendingError> {
-        amm::update_il_tracking(&env, &asset, current_price)
-            .map_err(|_| LendingError::InvalidAmount)
-    }
-
-    /// Return the current IL snapshot for an asset, or `None` if not tracked.
-    pub fn amm_get_il_snapshot(env: Env, asset: Address) -> Option<amm::IlSnapshot> {
-        amm::get_il_snapshot(&env, &asset)
     }
 
     /// Update the utilization snapshot for a pool.
@@ -2189,8 +2299,29 @@ impl HelloContract {
     }
 
     // -------------------------------------------------------------------------
-    // Reputation (Issue #728)
+    // Reputation & Lending Pool Deployer (Issue #849)
     // -------------------------------------------------------------------------
+
+    pub fn reputation_initialize(
+        env: Env,
+        admin: Address,
+    ) -> Result<(), LendingError> {
+        reputation::initialize(&env, &admin).map_err(reputation_err)
+    }
+
+    pub fn reputation_set_deployment_config(
+        env: Env,
+        admin: Address,
+        config: reputation::PoolDeploymentConfig,
+    ) -> Result<(), LendingError> {
+        reputation::set_deployment_config(&env, &admin, config).map_err(reputation_err)
+    }
+
+    pub fn reputation_get_deployment_config(
+        env: Env,
+    ) -> reputation::PoolDeploymentConfig {
+        reputation::get_deployment_config(&env)
+    }
 
     pub fn record_deployer_success(
         env: Env,
@@ -2203,14 +2334,30 @@ impl HelloContract {
         env: Env,
         user: Address,
         on_time: bool,
-    ) -> Result<reputation::ParticipantReputation, LendingError> {
+    ) -> Result<reputation::UserReputation, LendingError> {
         reputation::record_user_repayment(&env, user, on_time).map_err(reputation_err)
+    }
+
+    pub fn record_user_borrow(
+        env: Env,
+        user: Address,
+        amount: i128,
+    ) -> Result<reputation::UserReputation, LendingError> {
+        reputation::record_user_borrow(&env, user, amount).map_err(reputation_err)
+    }
+
+    pub fn record_user_default(
+        env: Env,
+        admin: Address,
+        user: Address,
+    ) -> Result<reputation::UserReputation, LendingError> {
+        reputation::record_user_default(&env, admin, user).map_err(reputation_err)
     }
 
     pub fn get_user_reputation(
         env: Env,
         address: Address,
-    ) -> Result<reputation::ParticipantReputation, LendingError> {
+    ) -> Result<reputation::UserReputation, LendingError> {
         reputation::get_user_reputation(&env, &address).ok_or(LendingError::DataNotFound)
     }
 
@@ -2221,8 +2368,90 @@ impl HelloContract {
         reputation::get_deployer_reputation(&env, &address).ok_or(LendingError::DataNotFound)
     }
 
+    pub fn get_deployer_reputation_full(
+        env: Env,
+        address: Address,
+    ) -> Result<reputation::DeployerReputation, LendingError> {
+        reputation::get_deployer_reputation_full(&env, &address).map_err(reputation_err)
+    }
+
     pub fn get_reputation_fee_discount(env: Env, address: Address) -> u32 {
         reputation::get_fee_discount_bps(&env, &address)
+    }
+
+    pub fn get_reputation_borrow_limit_multiplier(env: Env, address: Address) -> u32 {
+        reputation::get_borrow_limit_multiplier_bps(&env, &address)
+    }
+
+    pub fn check_user_reputation_access(
+        env: Env,
+        address: Address,
+        min_tier: reputation::ReputationTier,
+    ) -> Result<bool, LendingError> {
+        reputation::check_user_access(&env, &address, min_tier).map_err(reputation_err)
+    }
+
+    pub fn check_deployer_eligibility(
+        env: Env,
+        deployer: Address,
+    ) -> Result<bool, LendingError> {
+        reputation::check_deployer_eligibility(&env, &deployer).map_err(reputation_err)
+    }
+
+    // ── Lending Pool Deployer ──────────────────────────────────────────────
+
+    pub fn deploy_pool(
+        env: Env,
+        deployer: Address,
+        pool_address: Address,
+        initial_deposit: i128,
+    ) -> Result<reputation::DeployerReputation, LendingError> {
+        reputation::record_pool_deployment(&env, deployer, pool_address, initial_deposit)
+            .map_err(reputation_err)
+    }
+
+    pub fn update_pool_metrics(
+        env: Env,
+        admin: Address,
+        pool_address: Address,
+        tvl_delta: i128,
+        borrowers_delta: u32,
+        liquidation_delta: u32,
+        borrowers_add: bool,
+    ) -> Result<(), LendingError> {
+        reputation::update_pool_metrics(
+            &env,
+            admin,
+            pool_address,
+            tvl_delta,
+            borrowers_delta,
+            liquidation_delta,
+            borrowers_add,
+        )
+        .map_err(reputation_err)
+    }
+
+    pub fn record_pool_abandonment(
+        env: Env,
+        admin: Address,
+        pool_address: Address,
+    ) -> Result<reputation::DeployerReputation, LendingError> {
+        reputation::record_pool_abandonment(&env, admin, pool_address).map_err(reputation_err)
+    }
+
+    pub fn get_pool_record(
+        env: Env,
+        pool_address: Address,
+    ) -> Result<reputation::DeployerPoolRecord, LendingError> {
+        reputation::get_pool_record(&env, &pool_address).map_err(reputation_err)
+    }
+
+    pub fn reputation_apply_decay(
+        env: Env,
+        address: Address,
+        is_deployer: bool,
+    ) -> Result<(), LendingError> {
+        reputation::apply_decay(&env, address, is_deployer).map_err(reputation_err)
     }
 
     // -------------------------------------------------------------------------
@@ -2271,6 +2500,10 @@ fn reputation_err(error: reputation::ReputationError) -> LendingError {
         reputation::ReputationError::Unauthorized => LendingError::Unauthorized,
         reputation::ReputationError::NotFound => LendingError::DataNotFound,
         reputation::ReputationError::AccessDenied => LendingError::LimitExceeded,
+        reputation::ReputationError::InvalidParameter => LendingError::InvalidParameter,
+        reputation::ReputationError::AlreadyExists => LendingError::AlreadyExists,
+        reputation::ReputationError::RateLimitExceeded => LendingError::LimitExceeded,
+        reputation::ReputationError::InsufficientReputation => LendingError::InsufficientCollateral,
     }
 }
 
@@ -2507,14 +2740,5 @@ mod treasury_test;
     pub fn get_circuit_breaker_whitelist(env: Env) -> Vec<Address> {
         circuit_breaker::get_whitelist(&env)
     }
-#[cfg(test)]
-#[path = "tests/diff_harness.rs"]
-mod diff_harness;
-#[cfg(test)]
-#[path = "tests/differential_test.rs"]
-mod differential_test;
-#[cfg(test)]
-#[path = "tests/migration_verification_test.rs"]
-mod migration_verification_test;
 #[cfg(test)]
 mod cross_asset_risk_test;
