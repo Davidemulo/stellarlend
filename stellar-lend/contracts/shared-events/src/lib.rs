@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 #![allow(deprecated)]
 
-use soroban_sdk::{contractevent, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contractevent, contracttype, Address, String, Symbol, Vec};
 
 /// Asset status as used in the protocol
 #[contracttype]
