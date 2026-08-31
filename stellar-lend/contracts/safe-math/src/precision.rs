@@ -28,7 +28,6 @@ impl PrecisionTracker {
         if b == 0 {
             return;
         }
-        let expected = a / b;
         let lost = (a - result * b).abs();
         if lost > 0 {
             let entry = PrecisionLoss {
@@ -68,6 +67,6 @@ impl PrecisionTracker {
     }
 
     pub fn log_count(&self) -> u32 {
-        self.logs.len() as u32
+        self.logs.len()
     }
 }
