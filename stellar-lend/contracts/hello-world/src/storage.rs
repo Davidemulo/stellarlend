@@ -138,7 +138,11 @@ pub fn load_pool_config(env: &Env, pool: &Option<Address>) -> Option<PoolConfig>
         .map(|p| unpack(&p))
 }
 
-pub fn store_pool_config(env: &Env, pool: &Option<Address>, config: &PoolConfig) -> Result<(), PackError> {
+pub fn store_pool_config(
+    env: &Env,
+    pool: &Option<Address>,
+    config: &PoolConfig,
+) -> Result<(), PackError> {
     let packed = pack(config)?;
     env.storage()
         .persistent()
@@ -151,13 +155,14 @@ pub fn migrate_from_legacy(env: &Env, pool: &Option<Address>) -> Result<PoolConf
         return Ok(existing);
     }
 
-    let global_risk = crate::risk_params::get_legacy_risk_params(env).unwrap_or(crate::risk_params::RiskParams {
-        min_collateral_ratio: 11_000,
-        liquidation_threshold: 10_500,
-        close_factor: 5_000,
-        liquidation_incentive: 1_000,
-        last_update: env.ledger().timestamp(),
-    });
+    let global_risk =
+        crate::risk_params::get_legacy_risk_params(env).unwrap_or(crate::risk_params::RiskParams {
+            min_collateral_ratio: 11_000,
+            liquidation_threshold: 10_500,
+            close_factor: 5_000,
+            liquidation_incentive: 1_000,
+            last_update: env.ledger().timestamp(),
+        });
 
     let reserve_factor = crate::reserve::get_legacy_reserve_factor(env, pool.clone());
 
@@ -297,9 +302,10 @@ pub fn get_temp_token_balance(env: &Env, token: &Address, owner: &Address) -> Op
 }
 
 pub fn set_temp_token_balance(env: &Env, token: &Address, owner: &Address, balance: i128) {
-    env.storage()
-        .temporary()
-        .set(&TempDataKey::TokenBalanceCache(token.clone(), owner.clone()), &balance);
+    env.storage().temporary().set(
+        &TempDataKey::TokenBalanceCache(token.clone(), owner.clone()),
+        &balance,
+    );
 }
 
 pub fn get_temp_lending_index(env: &Env) -> Option<crate::interest_rate::LendingIndex> {

@@ -347,8 +347,12 @@ pub fn write_markdown(results: &[BenchmarkResult], path: &str) {
     if findings.is_empty() {
         markdown.push_str("No gas optimization findings were detected.\n\n");
     } else {
-        markdown.push_str("| Severity | Operation | Instruction Overage | Storage Ops | Recommendation |\n");
-        markdown.push_str("|----------|-----------|----------------------|-------------|----------------|\n");
+        markdown.push_str(
+            "| Severity | Operation | Instruction Overage | Storage Ops | Recommendation |\n",
+        );
+        markdown.push_str(
+            "|----------|-----------|----------------------|-------------|----------------|\n",
+        );
         for finding in &findings {
             markdown.push_str(&format!(
                 "| {:?} | {} | {:,} | {} | {} |\n",

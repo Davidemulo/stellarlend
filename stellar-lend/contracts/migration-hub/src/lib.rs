@@ -254,7 +254,12 @@ impl MigrationHub {
         Self::save_migration(&env, id, &record);
         Self::update_analytics(&env, true, record.amount);
 
-        log!(&env, "Partial migration successful for user {} percentage {}", user, percentage);
+        log!(
+            &env,
+            "Partial migration successful for user {} percentage {}",
+            user,
+            percentage
+        );
 
         Ok(id)
     }
@@ -350,10 +355,7 @@ impl MigrationHub {
     }
 
     /// Get migration history for a user.
-    pub fn get_user_migration_history(
-        env: Env,
-        user: Address,
-    ) -> Vec<MigrationRecord> {
+    pub fn get_user_migration_history(env: Env, user: Address) -> Vec<MigrationRecord> {
         let mut history: Vec<MigrationRecord> = Vec::new();
 
         // Simplified: would iterate through all migrations and filter by user

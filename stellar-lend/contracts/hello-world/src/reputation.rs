@@ -134,11 +134,7 @@ fn borrow_limit_multiplier_bps(tier: &ReputationTier) -> u32 {
     }
 }
 
-fn compute_user_score(
-    total_repayments: u32,
-    on_time_repayments: u32,
-    defaults: u32,
-) -> u32 {
+fn compute_user_score(total_repayments: u32, on_time_repayments: u32, defaults: u32) -> u32 {
     if total_repayments == 0 {
         return 0;
     }
@@ -149,7 +145,11 @@ fn compute_user_score(
         0
     };
 
-    let capped_total: u64 = if total_repayments > 100 { 100 } else { total_repayments as u64 };
+    let capped_total: u64 = if total_repayments > 100 {
+        100
+    } else {
+        total_repayments as u64
+    };
     let count_component: u64 = capped_total * 1000 / 100;
 
     let default_penalty: u64 = (defaults as u64) * 200;
@@ -162,7 +162,11 @@ fn compute_user_score(
     let weighted: u64 = on_time_component * 40 + count_component * 30 + no_default_component * 30;
     let score = weighted / 100;
 
-    if score > 1000 { 1000 } else { score as u32 }
+    if score > 1000 {
+        1000
+    } else {
+        score as u32
+    }
 }
 
 fn compute_deployer_score(
@@ -213,7 +217,11 @@ fn compute_deployer_score(
         + tvl_component * 10;
 
     let score = weighted / 100;
-    if score > 1000 { 1000 } else { score as u32 }
+    if score > 1000 {
+        1000
+    } else {
+        score as u32
+    }
 }
 
 fn default_config() -> PoolDeploymentConfig {
@@ -228,16 +236,14 @@ fn default_config() -> PoolDeploymentConfig {
 pub fn initialize(env: &Env, admin: &Address) -> Result<(), ReputationError> {
     crate::admin::require_admin(env, admin).map_err(|_| ReputationError::Unauthorized)?;
 
-    if env
-        .storage()
-        .instance()
-        .has(&ReputationKey::Config)
-    {
+    if env.storage().instance().has(&ReputationKey::Config) {
         return Err(ReputationError::AlreadyExists);
     }
 
     let config = default_config();
-    env.storage().instance().set(&ReputationKey::Config, &config);
+    env.storage()
+        .instance()
+        .set(&ReputationKey::Config, &config);
     Ok(())
 }
 
@@ -252,7 +258,9 @@ pub fn set_deployment_config(
         return Err(ReputationError::InvalidParameter);
     }
 
-    env.storage().instance().set(&ReputationKey::Config, &config);
+    env.storage()
+        .instance()
+        .set(&ReputationKey::Config, &config);
     Ok(())
 }
 
@@ -263,9 +271,13 @@ pub fn get_deployment_config(env: &Env) -> PoolDeploymentConfig {
         .unwrap_or_else(default_config)
 }
 
-pub fn record_deployer_success(env: &Env, deployer: Address) -> Result<ParticipantReputation, ReputationError> {
+pub fn record_deployer_success(
+    env: &Env,
+    deployer: Address,
+) -> Result<ParticipantReputation, ReputationError> {
     deployer.require_auth();
-    let mut rep = get_deployer_reputation_internal(env, &deployer).unwrap_or_else(|_| empty_deployer_participant(&deployer));
+    let mut rep = get_deployer_reputation_internal(env, &deployer)
+        .unwrap_or_else(|_| empty_deployer_participant(&deployer));
     rep.successful_ops = rep.successful_ops.saturating_add(1);
     rep.score = (rep.score.saturating_add(10)).min(1000);
     rep.tier = tier_from_score(rep.score);
@@ -276,9 +288,14 @@ pub fn record_deployer_success(env: &Env, deployer: Address) -> Result<Participa
     Ok(rep)
 }
 
-pub fn record_user_repayment(env: &Env, user: Address, on_time: bool) -> Result<UserReputation, ReputationError> {
+pub fn record_user_repayment(
+    env: &Env,
+    user: Address,
+    on_time: bool,
+) -> Result<UserReputation, ReputationError> {
     user.require_auth();
-    let mut rep = get_user_reputation_internal(env, &user).unwrap_or_else(|_| empty_user_reputation(&user));
+    let mut rep =
+        get_user_reputation_internal(env, &user).unwrap_or_else(|_| empty_user_reputation(&user));
     rep.total_repayments = rep.total_repayments.saturating_add(1);
     if on_time {
         rep.on_time_repayments = rep.on_time_repayments.saturating_add(1);
@@ -301,7 +318,8 @@ pub fn record_user_borrow(
     if amount <= 0 {
         return Err(ReputationError::InvalidParameter);
     }
-    let mut rep = get_user_reputation_internal(env, &user).unwrap_or_else(|_| empty_user_reputation(&user));
+    let mut rep =
+        get_user_reputation_internal(env, &user).unwrap_or_else(|_| empty_user_reputation(&user));
     rep.total_borrowed = rep.total_borrowed.saturating_add(amount);
     rep.last_activity = env.ledger().timestamp();
     env.storage()
@@ -316,7 +334,8 @@ pub fn record_user_default(
     user: Address,
 ) -> Result<UserReputation, ReputationError> {
     crate::admin::require_admin(env, &admin).map_err(|_| ReputationError::Unauthorized)?;
-    let mut rep = get_user_reputation_internal(env, &user).unwrap_or_else(|_| empty_user_reputation(&user));
+    let mut rep =
+        get_user_reputation_internal(env, &user).unwrap_or_else(|_| empty_user_reputation(&user));
     rep.defaults = rep.defaults.saturating_add(1);
     rep.score = compute_user_score(rep.total_repayments, rep.on_time_repayments, rep.defaults);
     rep.tier = tier_from_score(rep.score);
@@ -382,9 +401,10 @@ pub fn record_pool_deployment(
         .persistent()
         .set(&ReputationKey::Deployer(deployer.clone()), &deployer_rep);
 
-    env.storage()
-        .persistent()
-        .set(&ReputationKey::DeployerLastDeploy(deployer.clone()), &env.ledger().timestamp());
+    env.storage().persistent().set(
+        &ReputationKey::DeployerLastDeploy(deployer.clone()),
+        &env.ledger().timestamp(),
+    );
 
     let pool_record = DeployerPoolRecord {
         pool_address: pool_address.clone(),
@@ -395,9 +415,10 @@ pub fn record_pool_deployment(
         performance_score: 500,
         is_active: true,
     };
-    env.storage()
-        .persistent()
-        .set(&ReputationKey::PoolRecord(pool_address.clone()), &pool_record);
+    env.storage().persistent().set(
+        &ReputationKey::PoolRecord(pool_address.clone()),
+        &pool_record,
+    );
     env.storage()
         .persistent()
         .set(&ReputationKey::PoolToDeployer(pool_address), &deployer);
@@ -428,7 +449,9 @@ pub fn update_pool_metrics(
     } else {
         pool_record.active_borrowers = pool_record.active_borrowers.saturating_sub(borrowers_delta);
     }
-    pool_record.liquidation_events = pool_record.liquidation_events.saturating_add(liquidation_delta);
+    pool_record.liquidation_events = pool_record
+        .liquidation_events
+        .saturating_add(liquidation_delta);
 
     let perf_liquidation_penalty = pool_record.liquidation_events.saturating_mul(20);
     pool_record.performance_score = if perf_liquidation_penalty >= 1000 {
@@ -440,9 +463,10 @@ pub fn update_pool_metrics(
         pool_record.performance_score = pool_record.performance_score.saturating_add(50).min(1000);
     }
 
-    env.storage()
-        .persistent()
-        .set(&ReputationKey::PoolRecord(pool_address.clone()), &pool_record);
+    env.storage().persistent().set(
+        &ReputationKey::PoolRecord(pool_address.clone()),
+        &pool_record,
+    );
 
     if let Some(deployer) = env
         .storage()
@@ -507,7 +531,9 @@ pub fn record_pool_abandonment(
         .get::<_, DeployerPoolRecord>(&pool_record_key)
     {
         pool_record.is_active = false;
-        env.storage().persistent().set(&pool_record_key, &pool_record);
+        env.storage()
+            .persistent()
+            .set(&pool_record_key, &pool_record);
     }
 
     Ok(deployer_rep)
@@ -559,8 +585,13 @@ pub fn apply_decay(env: &Env, address: Address, is_deployer: bool) -> Result<(),
     Ok(())
 }
 
-pub fn check_user_access(env: &Env, address: &Address, min_tier: ReputationTier) -> Result<bool, ReputationError> {
-    let rep = get_user_reputation_internal(env, address).unwrap_or_else(|_| empty_user_reputation(address));
+pub fn check_user_access(
+    env: &Env,
+    address: &Address,
+    min_tier: ReputationTier,
+) -> Result<bool, ReputationError> {
+    let rep = get_user_reputation_internal(env, address)
+        .unwrap_or_else(|_| empty_user_reputation(address));
     let allowed = (rep.tier as u32) >= (min_tier as u32);
     if allowed {
         Ok(true)
@@ -571,7 +602,8 @@ pub fn check_user_access(env: &Env, address: &Address, min_tier: ReputationTier)
 
 pub fn check_deployer_eligibility(env: &Env, deployer: &Address) -> Result<bool, ReputationError> {
     let config = get_deployment_config(env);
-    let rep = get_deployer_reputation_full(env, deployer).unwrap_or_else(|_| empty_deployer_reputation(env, deployer));
+    let rep = get_deployer_reputation_full(env, deployer)
+        .unwrap_or_else(|_| empty_deployer_reputation(env, deployer));
 
     if rep.total_pools_created == 0 {
         return Ok(true);
@@ -594,14 +626,20 @@ pub fn get_deployer_reputation(env: &Env, address: &Address) -> Option<Participa
         .get(&ReputationKey::Deployer(address.clone()))
 }
 
-fn get_deployer_reputation_internal(env: &Env, address: &Address) -> Result<ParticipantReputation, ReputationError> {
+fn get_deployer_reputation_internal(
+    env: &Env,
+    address: &Address,
+) -> Result<ParticipantReputation, ReputationError> {
     env.storage()
         .persistent()
         .get(&ReputationKey::Deployer(address.clone()))
         .ok_or(ReputationError::NotFound)
 }
 
-pub fn get_deployer_reputation_full(env: &Env, address: &Address) -> Result<DeployerReputation, ReputationError> {
+pub fn get_deployer_reputation_full(
+    env: &Env,
+    address: &Address,
+) -> Result<DeployerReputation, ReputationError> {
     env.storage()
         .persistent()
         .get(&ReputationKey::Deployer(address.clone()))
@@ -614,14 +652,20 @@ pub fn get_user_reputation(env: &Env, address: &Address) -> Option<UserReputatio
         .get(&ReputationKey::User(address.clone()))
 }
 
-fn get_user_reputation_internal(env: &Env, address: &Address) -> Result<UserReputation, ReputationError> {
+fn get_user_reputation_internal(
+    env: &Env,
+    address: &Address,
+) -> Result<UserReputation, ReputationError> {
     env.storage()
         .persistent()
         .get(&ReputationKey::User(address.clone()))
         .ok_or(ReputationError::NotFound)
 }
 
-pub fn get_pool_record(env: &Env, pool_address: &Address) -> Result<DeployerPoolRecord, ReputationError> {
+pub fn get_pool_record(
+    env: &Env,
+    pool_address: &Address,
+) -> Result<DeployerPoolRecord, ReputationError> {
     env.storage()
         .persistent()
         .get(&ReputationKey::PoolRecord(pool_address.clone()))
@@ -817,7 +861,10 @@ mod tests {
         assert_eq!(borrow_limit_multiplier_bps(&ReputationTier::Bronze), 10_000);
         assert_eq!(borrow_limit_multiplier_bps(&ReputationTier::Silver), 11_000);
         assert_eq!(borrow_limit_multiplier_bps(&ReputationTier::Gold), 12_500);
-        assert_eq!(borrow_limit_multiplier_bps(&ReputationTier::Platinum), 15_000);
+        assert_eq!(
+            borrow_limit_multiplier_bps(&ReputationTier::Platinum),
+            15_000
+        );
     }
 
     #[test]
@@ -850,7 +897,10 @@ mod tests {
         let pool = Address::generate(&env);
 
         let result = record_pool_deployment(&env, deployer, pool, 100);
-        assert!(matches!(result, Err(ReputationError::InsufficientReputation)));
+        assert!(matches!(
+            result,
+            Err(ReputationError::InsufficientReputation)
+        ));
     }
 
     #[test]
@@ -914,16 +964,7 @@ mod tests {
 
         record_pool_deployment(&env, deployer.clone(), pool.clone(), 5_000_000).unwrap();
 
-        update_pool_metrics(
-            &env,
-            admin,
-            pool.clone(),
-            2_000_000,
-            5,
-            0,
-            true,
-        )
-        .unwrap();
+        update_pool_metrics(&env, admin, pool.clone(), 2_000_000, 5, 0, true).unwrap();
 
         let record = get_pool_record(&env, &pool).unwrap();
         assert_eq!(record.tvl, 7_000_000);

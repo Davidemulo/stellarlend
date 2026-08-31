@@ -887,21 +887,18 @@ pub struct DataStoreMigrateEvent {
     pub memo: Option<String>,
 }
 
-
 /// Emits a standardized event across the protocol.
 #[macro_export]
 macro_rules! emit_event {
-    ($env:expr, $module:expr, $action:expr, $caller:expr, $asset:expr, $amount:expr) => {
-        {
-            let topics = (
-                soroban_sdk::Symbol::new($env, "PROTOCOL_EVENT"),
-                soroban_sdk::Symbol::new($env, $module),
-                soroban_sdk::Symbol::new($env, $action),
-                $caller.clone(),
-                $asset.clone(),
-            );
-            let data = ($amount, 1u32);
-            $env.events().publish(topics, data);
-        }
-    };
+    ($env:expr, $module:expr, $action:expr, $caller:expr, $asset:expr, $amount:expr) => {{
+        let topics = (
+            soroban_sdk::Symbol::new($env, "PROTOCOL_EVENT"),
+            soroban_sdk::Symbol::new($env, $module),
+            soroban_sdk::Symbol::new($env, $action),
+            $caller.clone(),
+            $asset.clone(),
+        );
+        let data = ($amount, 1u32);
+        $env.events().publish(topics, data);
+    }};
 }

@@ -44,14 +44,7 @@ impl PrecisionTracker {
         }
     }
 
-    pub fn track_mul_div(
-        &mut self,
-        env: &Env,
-        a: i128,
-        b: i128,
-        denominator: i128,
-        result: i128,
-    ) {
+    pub fn track_mul_div(&mut self, env: &Env, a: i128, b: i128, denominator: i128, result: i128) {
         if denominator == 0 {
             return;
         }

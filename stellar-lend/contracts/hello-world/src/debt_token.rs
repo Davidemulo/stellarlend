@@ -349,8 +349,7 @@ fn move_debt_token_ownership(
     }
 
     // Get token position
-    let position = get_debt_position(env, token_id)
-        .ok_or(DebtTokenError::TokenNotFound)?;
+    let position = get_debt_position(env, token_id).ok_or(DebtTokenError::TokenNotFound)?;
 
     // Check liquidation status
     if position.is_liquidatable {
@@ -365,7 +364,9 @@ fn move_debt_token_ownership(
 
     // Remove from current owner
     let mut from_tokens = owner_tokens;
-    let index = from_tokens.iter().position(|&id| id == token_id)
+    let index = from_tokens
+        .iter()
+        .position(|&id| id == token_id)
         .ok_or(DebtTokenError::TokenNotFound)?;
     from_tokens.remove(index);
 
@@ -382,7 +383,9 @@ fn move_debt_token_ownership(
     let mut updated_position = position;
     updated_position.updated_at = env.ledger().timestamp();
     let position_key = DebtTokenDataKey::TokenPosition(token_id);
-    env.storage().persistent().set(&position_key, &updated_position);
+    env.storage()
+        .persistent()
+        .set(&position_key, &updated_position);
 
     // Emit transfer event
     DebtTokenTransferredEvent {
@@ -565,8 +568,7 @@ pub fn burn_debt_token(
     user.require_auth();
 
     // Get token position
-    let position = get_debt_position(env, token_id)
-        .ok_or(DebtTokenError::TokenNotFound)?;
+    let position = get_debt_position(env, token_id).ok_or(DebtTokenError::TokenNotFound)?;
 
     // Verify ownership
     let owner_tokens = get_user_debt_tokens(env, &user);
@@ -576,7 +578,9 @@ pub fn burn_debt_token(
 
     // Remove from owner's token list
     let mut user_tokens = owner_tokens;
-    let index = user_tokens.iter().position(|&id| id == token_id)
+    let index = user_tokens
+        .iter()
+        .position(|&id| id == token_id)
         .ok_or(DebtTokenError::TokenNotFound)?;
     user_tokens.remove(index);
 
@@ -656,11 +660,7 @@ pub fn get_total_supply(env: &Env) -> u64 {
 ///
 /// # Errors
 /// * `Unauthorized` - Caller is not admin
-pub fn set_transfer_pause(
-    env: &Env,
-    admin: Address,
-    paused: bool,
-) -> Result<(), DebtTokenError> {
+pub fn set_transfer_pause(env: &Env, admin: Address, paused: bool) -> Result<(), DebtTokenError> {
     // Verify admin authorization
     let admin_key = DepositDataKey::Admin;
     let stored_admin: Address = env
@@ -668,11 +668,11 @@ pub fn set_transfer_pause(
         .persistent()
         .get(&admin_key)
         .ok_or(DebtTokenError::Unauthorized)?;
-    
+
     if admin != stored_admin {
         return Err(DebtTokenError::Unauthorized);
     }
-    
+
     admin.require_auth();
 
     env.storage()
@@ -705,11 +705,11 @@ pub fn set_address_blocked(
         .persistent()
         .get(&admin_key)
         .ok_or(DebtTokenError::Unauthorized)?;
-    
+
     if admin != stored_admin {
         return Err(DebtTokenError::Unauthorized);
     }
-    
+
     admin.require_auth();
 
     if blocked {
@@ -923,7 +923,11 @@ fn save_marketplace_stats(env: &Env, stats: &MarketplaceStats) {
 }
 
 fn record_trade_price(env: &Env, token_id: u64, price: i128, payment_token: Address, now: u64) {
-    let tp = TradePrice { price, payment_token: payment_token.clone(), timestamp: now };
+    let tp = TradePrice {
+        price,
+        payment_token: payment_token.clone(),
+        timestamp: now,
+    };
 
     // Update last-trade price.
     env.storage()
@@ -1168,7 +1172,15 @@ pub fn accept_bid(
     }
 
     // Record trade for price-discovery.
-    record_trade(env, token_id, seller.clone(), bidder.clone(), bid.price, bid.payment_token.clone(), now);
+    record_trade(
+        env,
+        token_id,
+        seller.clone(),
+        bidder.clone(),
+        bid.price,
+        bid.payment_token.clone(),
+        now,
+    );
 
     DebtTokenBidAcceptedEvent {
         token_id,
@@ -1222,7 +1234,10 @@ pub fn get_twap_price(env: &Env, token_id: u64) -> Option<i128> {
 
     // Simple arithmetic mean over price observations.
     let n = window.len() as i128;
-    let sum: i128 = window.iter().map(|tp| tp.price).fold(0i128, |acc, p| acc.saturating_add(p));
+    let sum: i128 = window
+        .iter()
+        .map(|tp| tp.price)
+        .fold(0i128, |acc, p| acc.saturating_add(p));
     Some(sum.checked_div(n).unwrap_or(sum))
 }
 
@@ -1268,7 +1283,15 @@ pub fn buy_listed_debt_token_tracked(
     let now = env.ledger().timestamp();
 
     // Price discovery record.
-    record_trade(env, token_id, listing.seller.clone(), buyer.clone(), listing.price, listing.payment_token.clone(), now);
+    record_trade(
+        env,
+        token_id,
+        listing.seller.clone(),
+        buyer.clone(),
+        listing.price,
+        listing.payment_token.clone(),
+        now,
+    );
 
     // Update listings counter.
     let mut stats = get_marketplace_stats(env);

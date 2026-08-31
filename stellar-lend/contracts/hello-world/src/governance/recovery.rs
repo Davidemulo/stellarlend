@@ -1,9 +1,9 @@
 use soroban_sdk::{Address, Env, Vec};
 
 use crate::errors::GovernanceError;
+use crate::events::{RecoveryApprovedEvent, RecoveryExecutedEvent, RecoveryStartedEvent};
 use crate::storage::{GovernanceDataKey, GuardianConfig};
 use crate::types::{MultisigConfig, RecoveryRequest, DEFAULT_RECOVERY_PERIOD};
-use crate::events::{RecoveryApprovedEvent, RecoveryExecutedEvent, RecoveryStartedEvent};
 
 pub fn start_recovery(
     env: &Env,
